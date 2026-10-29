@@ -3,11 +3,12 @@ export type Competitor = {
   name: string;
 };
 
+export type TournamentFormat = "Americano" | "Eliminatoria";
+
 export type Match = {
-  tournament_id: string;
   round_number: number;
-  competitor1_id: string;
-  competitor2_id: string | null;
+  competitor1_name: string;
+  competitor2_name: string | null;
   status: "pendiente";
 };
 
@@ -19,14 +20,13 @@ export function parseParticipants(rawText: string): string[] {
 }
 
 export function generateAmericanoFixture(
-  competitors: Competitor[],
-  tournamentId: string,
+  competitors: Array<Pick<Competitor, "name">>,
 ): Match[] {
   if (competitors.length < 2) {
     return [];
   }
 
-  const players: Array<Competitor | null> = [...competitors];
+  const players: Array<Pick<Competitor, "name"> | null> = [...competitors];
 
   if (players.length % 2 !== 0) {
     players.push(null);
@@ -46,10 +46,10 @@ export function generateAmericanoFixture(
       }
 
       fixture.push({
-        tournament_id: tournamentId,
         round_number: roundIndex + 1,
-        competitor1_id: firstCompetitor?.id ?? secondCompetitor!.id,
-        competitor2_id: firstCompetitor === null ? null : secondCompetitor?.id ?? null,
+        competitor1_name: firstCompetitor?.name ?? secondCompetitor!.name,
+        competitor2_name:
+          firstCompetitor === null ? null : secondCompetitor?.name ?? null,
         status: "pendiente",
       });
     }
@@ -68,4 +68,42 @@ export function generateAmericanoFixture(
   }
 
   return fixture;
+}
+
+export function generateEliminationFixture(
+  competitors: Array<Pick<Competitor, "name">>,
+): Match[] {
+  if (competitors.length < 2) {
+    return [];
+  }
+
+  const bracketSize = 2 ** Math.ceil(Math.log2(competitors.length));
+  const fixture: Match[] = [];
+
+  for (let index = 0; index < bracketSize / 2; index += 1) {
+    const firstCompetitor = competitors[index] ?? null;
+    const secondCompetitor = competitors[bracketSize - 1 - index] ?? null;
+
+    if (!firstCompetitor && !secondCompetitor) {
+      continue;
+    }
+
+    fixture.push({
+      round_number: 1,
+      competitor1_name: firstCompetitor?.name ?? secondCompetitor!.name,
+      competitor2_name: firstCompetitor ? secondCompetitor?.name ?? null : null,
+      status: "pendiente",
+    });
+  }
+
+  return fixture;
+}
+
+export function generateFixture(
+  competitors: Array<Pick<Competitor, "name">>,
+  format: TournamentFormat,
+): Match[] {
+  return format === "Eliminatoria"
+    ? generateEliminationFixture(competitors)
+    : generateAmericanoFixture(competitors);
 }

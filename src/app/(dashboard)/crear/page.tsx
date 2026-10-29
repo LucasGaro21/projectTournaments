@@ -6,14 +6,15 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import {
-  generateAmericanoFixture,
+  generateFixture,
   parseParticipants,
+  type TournamentFormat,
 } from "@/lib/matchmaking";
 
 export default function CreateTournamentPage() {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [format, setFormat] = useState("Americano");
+  const [format, setFormat] = useState<TournamentFormat>("Americano");
   const [participants, setParticipants] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -55,54 +56,30 @@ export default function CreateTournamentPage() {
         throw userError ?? new Error("No hay una sesión administrativa activa.");
       }
 
-      const { data: tournament, error: tournamentError } = await supabase
-        .from("tournaments")
-        .insert({
-          name: tournamentName,
-          format,
-          status: "borrador",
-          owner_id: user.id,
-        })
-        .select("id")
-        .single();
-
-      if (tournamentError) {
-        throw tournamentError;
-      }
-
-      const { data: competitors, error: competitorsError } = await supabase
-        .from("competitors")
-        .insert(
-          participantNames.map((participantName) => ({
-            tournament_id: tournament.id,
-            name: participantName,
-          })),
-        )
-        .select();
-
-      if (competitorsError) {
-        throw competitorsError;
-      }
-
-      if (!competitors || competitors.length !== participantNames.length) {
-        throw new Error("No se pudieron crear todos los participantes.");
-      }
-
-      const fixture = generateAmericanoFixture(competitors, tournament.id);
+      const fixture = generateFixture(
+        participantNames.map((participantName) => ({ name: participantName })),
+        format,
+      );
 
       if (fixture.length === 0) {
         throw new Error("No se pudo generar ningún partido.");
       }
 
-      const { error: matchesError } = await supabase
-        .from("matches")
-        .insert(fixture);
+      const { data: tournamentId, error: createError } = await supabase.rpc(
+        "create_tournament",
+        {
+          p_name: tournamentName,
+          p_format: format,
+          p_participant_names: participantNames,
+          p_fixture: fixture,
+        },
+      );
 
-      if (matchesError) {
-        throw matchesError;
+      if (createError || !tournamentId) {
+        throw createError ?? new Error("No se pudo crear el torneo.");
       }
 
-      router.push("/");
+      router.push(`/dashboard/torneo/${tournamentId}`);
     } catch (submissionError) {
       console.error("Error al generar el fixture:", submissionError);
       setError("No se pudo generar el fixture. Inténtalo nuevamente.");
@@ -189,7 +166,15 @@ export default function CreateTournamentPage() {
             id="tournament-format"
             name="format"
             value={format}
-            onChange={(event) => setFormat(event.target.value)}
+            onChange={(event) => {
+              const nextFormat = event.target.value;
+              if (
+                nextFormat === "Americano" ||
+                nextFormat === "Eliminatoria"
+              ) {
+                setFormat(nextFormat);
+              }
+            }}
             className="w-full appearance-none rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-100 outline-none transition-colors focus:border-[#39ff14] focus:ring-1 focus:ring-[#39ff14]"
           >
             <option value="Americano">Americano</option>
