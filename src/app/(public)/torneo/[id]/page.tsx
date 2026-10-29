@@ -41,37 +41,41 @@ export default function TournamentPage({ params }: TournamentPageProps) {
     return localStorage.getItem(`torneo_${params.id}_competitor`) ?? "";
   });
   const [isLoading, setIsLoading] = useState(true);
-  const [matchToScore, setMatchToScore] = useState<string | null>(null);
-  const [isSubmittingScore, setIsSubmittingScore] = useState(false);
-  const [score1, setScore1] = useState("");
-  const [score2, setScore2] = useState("");
   const [isPremium, setIsPremium] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [hasMagicLink, setHasMagicLink] = useState(false);
+  const [isMagicLinkValid, setIsMagicLinkValid] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchTournamentData() {
       try {
+        const magicLinkToken = new URLSearchParams(window.location.search).get(
+          "token",
+        );
+        setHasMagicLink(Boolean(magicLinkToken));
+
         const [
           { data: competitorRows, error: competitorsError },
           { data: matchRows, error: matchesError },
           { data: tournament, error: tournamentError },
         ] = await Promise.all([
           supabase
-            .from("competitors")
+            .from("public_competitors")
             .select("id, name")
             .eq("tournament_id", params.id),
           supabase
-            .from("matches")
+            .from("public_matches")
             .select(
               "id, round_number, competitor1_id, competitor2_id, status, score1, score2",
             )
             .eq("tournament_id", params.id)
             .order("round_number", { ascending: true }),
           supabase
-            .from("tournaments")
+            .from("public_tournaments")
             .select("is_premium")
             .eq("id", params.id)
-            .single(),
+            .maybeSingle(),
         ]);
 
         if (competitorsError) {
@@ -86,8 +90,34 @@ export default function TournamentPage({ params }: TournamentPageProps) {
           throw tournamentError;
         }
 
+        if (!tournament) {
+          setLoadError(
+            "Este torneo todavía no está publicado o ya no existe.",
+          );
+          return;
+        }
+
         const loadedCompetitors = (competitorRows ?? []) as Competitor[];
         const loadedMatches = (matchRows ?? []) as MatchRow[];
+        if (magicLinkToken) {
+          const { data: tokenIsValid, error: tokenError } = await supabase.rpc(
+            "validate_magic_link",
+            {
+              p_tournament_id: params.id,
+              p_token: magicLinkToken,
+            },
+          );
+
+          if (tokenError) {
+            throw tokenError;
+          }
+
+          if (!tokenIsValid) {
+            setIsMagicLinkValid(false);
+            return;
+          }
+        }
+
         const competitorsById = new Map(
           loadedCompetitors.map((competitor) => [competitor.id, competitor]),
         );
@@ -115,6 +145,9 @@ export default function TournamentPage({ params }: TournamentPageProps) {
         );
       } catch (error) {
         console.error("Error al cargar el torneo:", error);
+        setLoadError(
+          "No se pudo cargar este torneo. Verificá que la configuración de Supabase esté completa.",
+        );
       } finally {
         setIsLoading(false);
       }
@@ -166,59 +199,40 @@ export default function TournamentPage({ params }: TournamentPageProps) {
     }
   }
 
-  function openScoreModal(matchId: string) {
-    const match = matches.find((item) => item.id === matchId);
-
-    setScore1(match?.score1?.toString() ?? "");
-    setScore2(match?.score2?.toString() ?? "");
-    setMatchToScore(matchId);
-  }
-
-  async function handleSaveScore(
-    matchId: string,
-    nextScore1: number,
-    nextScore2: number,
-  ) {
-    setIsSubmittingScore(true);
-
-    try {
-      const { error } = await supabase
-        .from("matches")
-        .update({
-          score1: nextScore1,
-          score2: nextScore2,
-          status: "finalizado",
-        })
-        .eq("id", matchId);
-
-      if (error) {
-        throw error;
-      }
-
-      setMatches((currentMatches) =>
-        currentMatches.map((match) =>
-          match.id === matchId
-            ? {
-                ...match,
-                score1: nextScore1,
-                score2: nextScore2,
-                status: "finalizado",
-              }
-            : match,
-        ),
-      );
-      setMatchToScore(null);
-    } catch (error) {
-      console.error("Error al guardar el resultado:", error);
-    } finally {
-      setIsSubmittingScore(false);
-    }
-  }
-
   if (isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-100">
         <p className="text-sm text-zinc-400">Cargando torneo...</p>
+      </main>
+    );
+  }
+
+  if (!isMagicLinkValid) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-6 text-zinc-100">
+        <div className="max-w-md rounded-2xl border border-red-500/20 bg-red-500/10 p-8 text-center">
+          <Lock className="mx-auto size-8 text-red-300" aria-hidden="true" />
+          <h1 className="mt-4 text-xl font-semibold text-white">
+            Enlace no válido
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-red-200/80">
+            Este enlace mágico no coincide con el torneo o ya no está disponible.
+            Pedile al administrador que genere uno nuevo.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-6 text-zinc-100">
+        <div className="max-w-md rounded-2xl border border-red-500/20 bg-red-500/10 p-8 text-center">
+          <h1 className="text-xl font-semibold text-white">
+            No se pudo cargar el torneo
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-red-200/80">{loadError}</p>
+        </div>
       </main>
     );
   }
@@ -251,6 +265,11 @@ export default function TournamentPage({ params }: TournamentPageProps) {
           <p className="mt-2 text-sm text-zinc-400">
             Selecciona tu equipo para ver tus próximos partidos.
           </p>
+          {hasMagicLink ? (
+            <p className="mt-4 rounded-lg border border-[#39ff14]/20 bg-[#39ff14]/5 px-3 py-2 text-xs text-[#9bff8a]">
+              Enlace mágico verificado. Elegí tu equipo para ver tu tablero personalizado.
+            </p>
+          ) : null}
 
           <div id="export-container">
             {!isPremium ? <AdBanner /> : null}
@@ -316,7 +335,6 @@ export default function TournamentPage({ params }: TournamentPageProps) {
                 <LiveScoreCard
                   key={match.id}
                   match={match}
-                  onLoadResult={(id) => openScoreModal(id)}
                 />
               ))
             ) : (
@@ -339,85 +357,6 @@ export default function TournamentPage({ params }: TournamentPageProps) {
         </div>
       </div>
 
-      {matchToScore ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-6 backdrop-blur">
-          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-6">
-            {(() => {
-              const selectedMatch = matches.find(
-                (match) => match.id === matchToScore,
-              );
-
-              if (!selectedMatch) {
-                return null;
-              }
-
-              return (
-                <>
-                  <h2 className="text-xl font-bold text-zinc-100">
-                    Cargar resultado
-                  </h2>
-                  <div className="mt-6 grid grid-cols-2 gap-4">
-                    <label className="text-center text-sm text-zinc-300">
-                      <span className="block truncate">
-                        {selectedMatch.homeTeam.name}
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        value={score1}
-                        onChange={(event) => setScore1(event.target.value)}
-                        className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-3 text-center text-2xl font-bold text-white outline-none focus:border-[#39ff14]"
-                      />
-                    </label>
-                    <label className="text-center text-sm text-zinc-300">
-                      <span className="block truncate">
-                        {selectedMatch.awayTeam?.name ?? "Bye"}
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        value={score2}
-                        onChange={(event) => setScore2(event.target.value)}
-                        className="mt-2 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-3 text-center text-2xl font-bold text-white outline-none focus:border-[#39ff14]"
-                      />
-                    </label>
-                  </div>
-                  <div className="mt-6 flex justify-end gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setMatchToScore(null)}
-                      className="rounded-lg px-4 py-2 text-sm text-zinc-400 transition-colors hover:text-zinc-100"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      disabled={
-                        isSubmittingScore ||
-                        score1 === "" ||
-                        score2 === "" ||
-                        selectedMatch.awayTeam === null
-                      }
-                      onClick={() =>
-                        void handleSaveScore(
-                          selectedMatch.id,
-                          Number(score1),
-                          Number(score2),
-                        )
-                      }
-                      className="rounded-lg bg-[#39ff14] px-4 py-2 text-sm font-bold text-black transition-colors hover:bg-[#6aff4d] disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isSubmittingScore
-                        ? "Guardando..."
-                        : "Confirmar Resultado"}
-                    </button>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }

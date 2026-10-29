@@ -18,7 +18,7 @@ export default function LiveScoreCard({
   onLoadResult,
 }: {
   match: Match;
-  onLoadResult: (id: string) => void;
+  onLoadResult?: (id: string) => void;
 }) {
   return (
     <article className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
@@ -34,7 +34,7 @@ export default function LiveScoreCard({
           {match.awayTeam?.name ?? "Bye"}
         </span>
       </div>
-      {match.awayTeam ? (
+      {match.awayTeam && onLoadResult ? (
         <button
           type="button"
           onClick={() => onLoadResult(match.id)}
@@ -42,7 +42,13 @@ export default function LiveScoreCard({
         >
           Cargar resultado
         </button>
+      ) : match.status === "finalizado" ? (
+        <div className="mt-4 flex items-center justify-center gap-2 text-xs font-medium text-zinc-500">
+          <Lock className="size-3.5" aria-hidden="true" />
+          Resultado finalizado
+        </div>
       ) : null}
     </article>
   );
 }
+import { Lock } from "lucide-react";

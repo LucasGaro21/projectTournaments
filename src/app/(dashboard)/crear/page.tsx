@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { ArrowLeft, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ClipboardList, LoaderCircle, Sparkles, Trophy } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
@@ -21,27 +21,53 @@ export default function CreateTournamentPage() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+
+    const tournamentName = name.trim();
+    const participantNames = parseParticipants(participants);
+    const normalizedNames = participantNames.map((participantName) =>
+      participantName.toLocaleLowerCase(),
+    );
+
+    if (tournamentName.length < 3) {
+      setError("El nombre del torneo debe tener al menos 3 caracteres.");
+      return;
+    }
+
+    if (participantNames.length < 2) {
+      setError("Agrega al menos 2 participantes para generar el fixture.");
+      return;
+    }
+
+    if (new Set(normalizedNames).size !== participantNames.length) {
+      setError("La lista no puede contener participantes repetidos.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        throw userError ?? new Error("No hay una sesión administrativa activa.");
+      }
+
       const { data: tournament, error: tournamentError } = await supabase
         .from("tournaments")
         .insert({
-          name: name.trim(),
+          name: tournamentName,
           format,
           status: "borrador",
+          owner_id: user.id,
         })
         .select("id")
         .single();
 
       if (tournamentError) {
         throw tournamentError;
-      }
-
-      const participantNames = parseParticipants(participants);
-
-      if (participantNames.length === 0) {
-        throw new Error("Debes agregar al menos un participante.");
       }
 
       const { data: competitors, error: competitorsError } = await supabase
@@ -58,7 +84,16 @@ export default function CreateTournamentPage() {
         throw competitorsError;
       }
 
+      if (!competitors || competitors.length !== participantNames.length) {
+        throw new Error("No se pudieron crear todos los participantes.");
+      }
+
       const fixture = generateAmericanoFixture(competitors, tournament.id);
+
+      if (fixture.length === 0) {
+        throw new Error("No se pudo generar ningún partido.");
+      }
+
       const { error: matchesError } = await supabase
         .from("matches")
         .insert(fixture);
@@ -67,7 +102,7 @@ export default function CreateTournamentPage() {
         throw matchesError;
       }
 
-      router.push("/dashboard");
+      router.push("/");
     } catch (submissionError) {
       console.error("Error al generar el fixture:", submissionError);
       setError("No se pudo generar el fixture. Inténtalo nuevamente.");
@@ -77,7 +112,7 @@ export default function CreateTournamentPage() {
   }
 
   return (
-    <div className="mx-auto min-h-screen w-full max-w-3xl px-8 py-10 lg:px-12">
+    <div className="mx-auto min-h-screen w-full max-w-5xl px-6 py-8 sm:px-8 lg:px-12 lg:py-10">
       <Link
         href="/"
         className="inline-flex items-center gap-2 text-sm text-zinc-400 transition-colors hover:text-zinc-100"
@@ -93,15 +128,37 @@ export default function CreateTournamentPage() {
         <h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-100">
           Crear torneo
         </h1>
-        <p className="mt-2 text-sm text-zinc-400">
+        <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-400">
           Configura los datos iniciales para generar tu fixture.
         </p>
       </div>
 
-      <form
-        onSubmit={onSubmit}
-        className="mt-10 space-y-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 sm:p-8"
-      >
+      <div className="mt-10 grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
+        <aside className="rounded-2xl border border-[#39ff14]/20 bg-[#39ff14]/5 p-6">
+          <div className="flex size-12 items-center justify-center rounded-xl bg-[#39ff14] text-zinc-950">
+            <Sparkles className="size-6" aria-hidden="true" />
+          </div>
+          <h2 className="mt-6 text-xl font-bold text-white">Tu torneo, tu ritmo.</h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">
+            Cargá tus participantes y TorneosPro arma automáticamente todas las rondas.
+          </p>
+          <div className="mt-8 space-y-4">
+            {[
+              { icon: Trophy, text: "Fixture automático Round Robin" },
+              { icon: ClipboardList, text: "Resultados listos para gestionar" },
+            ].map(({ icon: Icon, text }) => (
+              <div key={text} className="flex items-center gap-3 text-sm text-zinc-300">
+                <Icon className="size-4 text-[#39ff14]" aria-hidden="true" />
+                {text}
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        <form
+          onSubmit={onSubmit}
+          className="space-y-6 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 shadow-2xl shadow-black/20 sm:p-8"
+        >
         <div>
           <label
             htmlFor="tournament-name"
@@ -174,7 +231,8 @@ export default function CreateTournamentPage() {
           ) : null}
           {isSubmitting ? "Generando Fixture..." : "Generar Fixture"}
         </button>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }

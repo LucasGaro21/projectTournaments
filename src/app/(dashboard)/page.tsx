@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ArrowUpRight,
   CalendarDays,
   CirclePlus,
   Crown,
+  RefreshCw,
   LoaderCircle,
   Trophy,
   Users,
@@ -24,29 +25,51 @@ type Tournament = {
 export default function DashboardPage() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadTournaments() {
+  const loadTournaments = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        throw userError ?? new Error("No hay una sesión administrativa activa.");
+      }
+
       const { data, error } = await supabase
         .from("tournaments")
         .select("id, name, format, status, is_premium")
+        .eq("owner_id", user.id)
         .order("created_at", { ascending: false });
 
-      if (error) {
-        console.error("Error al cargar los torneos:", error);
-      } else {
-        setTournaments((data ?? []) as Tournament[]);
-      }
-
+      if (error) throw error;
+      setTournaments((data ?? []) as Tournament[]);
+    } catch (error) {
+      console.error("Error al cargar los torneos:", error);
+      setLoadError("No se pudieron cargar tus torneos. Intentá nuevamente.");
+    } finally {
       setIsLoading(false);
     }
-
-    void loadTournaments();
   }, []);
+
+  useEffect(() => {
+    async function initializeDashboard() {
+      await loadTournaments();
+    }
+
+    void initializeDashboard();
+  }, [loadTournaments]);
 
   return (
     <div className="mx-auto min-h-screen w-full max-w-7xl px-6 py-8 sm:px-8 lg:px-12 lg:py-10">
-      <header className="flex flex-col gap-6 border-b border-zinc-800/80 pb-8 sm:flex-row sm:items-end sm:justify-between">
+      <header className="relative overflow-hidden rounded-3xl border border-zinc-800/80 bg-zinc-900/50 px-6 py-8 sm:px-8">
+        <div className="pointer-events-none absolute -right-20 -top-32 size-80 rounded-full bg-[#39ff14]/10 blur-3xl" />
+        <div className="relative flex flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="flex items-center gap-2 text-sm font-medium uppercase tracking-[0.2em] text-[#39ff14]">
             <span className="size-2 rounded-full bg-[#39ff14] shadow-[0_0_12px_#39ff14]" />
@@ -68,6 +91,7 @@ export default function DashboardPage() {
           <CirclePlus className="size-5" aria-hidden="true" />
           Crear Torneo
         </Link>
+        </div>
       </header>
 
       {isLoading ? (
@@ -77,6 +101,26 @@ export default function DashboardPage() {
             aria-label="Cargando torneos"
           />
         </div>
+      ) : loadError ? (
+        <section className="mt-10 flex min-h-[440px] items-center justify-center rounded-2xl border border-red-500/20 bg-red-500/5 px-6 py-16">
+          <div className="max-w-md text-center">
+            <div className="mx-auto flex size-16 items-center justify-center rounded-2xl border border-red-400/20 bg-red-400/10 text-red-300">
+              <RefreshCw className="size-7" aria-hidden="true" />
+            </div>
+            <h2 className="mt-6 text-xl font-semibold text-white">
+              No pudimos cargar tus torneos
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">{loadError}</p>
+            <button
+              type="button"
+              onClick={() => void loadTournaments()}
+              className="mt-6 inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:border-zinc-500 hover:text-white"
+            >
+              <RefreshCw className="size-4" aria-hidden="true" />
+              Reintentar
+            </button>
+          </div>
+        </section>
       ) : tournaments.length === 0 ? (
         <section
           aria-labelledby="empty-state-title"
@@ -106,6 +150,21 @@ export default function DashboardPage() {
         </section>
       ) : (
         <section className="mt-10">
+          <div className="mb-8 grid gap-3 sm:grid-cols-3">
+            {[
+              { label: "Torneos creados", value: tournaments.length, icon: Trophy },
+              { label: "En curso", value: tournaments.filter((item) => item.status !== "finalizado").length, icon: CalendarDays },
+              { label: "Premium", value: tournaments.filter((item) => item.is_premium).length, icon: Crown },
+            ].map(({ label, value, icon: Icon }) => (
+              <div key={label} className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+                <div className="flex items-center justify-between text-zinc-500">
+                  <span className="text-xs font-semibold uppercase tracking-wider">{label}</span>
+                  <Icon className="size-4 text-[#39ff14]" aria-hidden="true" />
+                </div>
+                <p className="mt-3 text-2xl font-bold text-white">{value}</p>
+              </div>
+            ))}
+          </div>
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">
               Torneos recientes
