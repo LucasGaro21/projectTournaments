@@ -1,4 +1,5 @@
 import { CalendarDays, LogOut, Settings } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 const navigation = [
@@ -30,14 +31,14 @@ export default function DashboardLayout({
 
         <nav className="mt-10 space-y-2" aria-label="Navegación principal">
           {navigation.map(({ href, label, icon: Icon }) => (
-            <a
+            <Link
               key={href}
               href={href}
-              className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white"
+              className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white"
             >
               <Icon className="size-5" aria-hidden="true" />
               {label}
-            </a>
+            </Link>
           ))}
         </nav>
 

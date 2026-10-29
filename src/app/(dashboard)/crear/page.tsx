@@ -79,7 +79,7 @@ export default function CreateTournamentPage() {
   return (
     <div className="mx-auto min-h-screen w-full max-w-3xl px-8 py-10 lg:px-12">
       <Link
-        href="/dashboard"
+        href="/"
         className="inline-flex items-center gap-2 text-sm text-zinc-400 transition-colors hover:text-zinc-100"
       >
         <ArrowLeft className="size-4" aria-hidden="true" />
