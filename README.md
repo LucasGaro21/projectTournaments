@@ -1,87 +1,123 @@
 # TorneosPro
 
-TorneosPro es una base para operar competencias amateur y semiprofesionales:
-creación de torneos, fixtures, resultados, tabla de posiciones y publicación
-de un enlace público. La prioridad del proyecto es que el resultado deportivo
-sea confiable y que la operación del organizador sea simple.
+Plataforma para organizar torneos amateurs (pádel, fútbol 5, tenis, truco,
+eSports…): el organizador pega la lista de participantes, se genera el fixture,
+carga resultados desde el celular y comparte un enlace público con la tabla en
+vivo.
 
-## Producto y reglas actuales
+## Modelo de negocio
 
-- El organizador crea una cuenta y administra únicamente sus torneos.
-- Un torneo nace como `borrador` y solo se publica cuando tiene participantes
-  y fixture.
-- Los participantes y partidos se crean junto con el torneo en una única
-  operación de base de datos. No se deben crear registros manualmente desde
-  el navegador.
-- `Americano` genera un todos-contra-todos con rondas rotativas.
-- `Eliminatoria` genera la primera ronda de un cuadro de eliminación; las
-  rondas siguientes requieren una evolución del modelo de competición.
-- Los resultados solo pueden cargarse desde el panel del organizador.
-- El sitio público consume vistas que excluyen torneos en borrador.
-- Premium se activa únicamente después de verificar el pago recibido por el
-  webhook de Mercado Pago.
+El producto es **gratis para organizadores** y se monetiza con **publicidad en
+las páginas públicas** de los torneos. Cada torneo es una fuente recurrente de
+tráfico: todos sus jugadores (y sus familias) vuelven a la página después de
+cada fecha para ver resultados y posiciones.
+
+Palancas de tráfico e ingresos incluidas en el código:
+
+| Palanca | Dónde |
+| --- | --- |
+| Páginas públicas renderizadas en servidor y cacheadas (indexables, rápidas) | `src/app/(site)/torneo/[id]` |
+| Metadatos SEO, JSON-LD `SportsEvent`, `sitemap.xml`, `robots.txt` | `generateMetadata`, `src/app/sitemap.ts` |
+| Imagen Open Graph con la tabla actual (previews atractivas en WhatsApp) | `opengraph-image.tsx` |
+| Botones de compartir (WhatsApp, copiar, nativo) | `ShareButtons` |
+| "Seguir a mi equipo": próximo partido y resaltado en la tabla | `PublicTournamentView` |
+| Actualización automática cada 45 s mientras el torneo está en juego | `useLiveRefresh` |
+| Directorio público por deporte/estado | `/torneos` |
+| Anuncios propios cuando AdSense no está configurado → más organizadores | `HouseAd` |
+| `ads.txt` generado desde la variable de entorno | `src/app/ads.txt/route.ts` |
+| Política de privacidad con la sección de cookies que exige AdSense | `/privacidad` |
+
+**Premium** (pago único por torneo con Mercado Pago) es el ingreso complementario:
+quita la publicidad de ese torneo, habilita la planilla imprimible/PDF y lo
+destaca primero en Explorar. Se activa solo cuando el webhook verifica el pago
+(firma, estado, moneda e importe).
+
+Ubicaciones de anuncios: arriba de la tabla, entre la tabla y los partidos, al
+pie, y uno cada seis tarjetas en Explorar. No hay anuncios en el panel ni en el
+login. Los anuncios nunca se recargan por código (política de AdSense); la
+actualización en vivo solo re-renderiza los datos.
+
+## Reglas del producto
+
+- Un torneo nace como `borrador`, se publica (`activo`) y se cierra
+  (`finalizado`). Se puede reabrir para corregir.
+- **Liga (Americano):** todos contra todos con el método del círculo. 3 puntos
+  por victoria, 1 por empate. Orden: puntos, diferencia, a favor, nombre.
+- **Eliminación directa:** llave completa con cabezas de serie estándar; los
+  mejores sembrados reciben los byes. El ganador avanza automáticamente. No se
+  permiten empates. No se puede cambiar un ganador si la ronda siguiente ya se
+  jugó.
+- Todas las escrituras pasan por funciones de Postgres (`SECURITY DEFINER`) que
+  validan dueño y estado. El navegador no tiene permisos de INSERT/UPDATE/DELETE
+  sobre las tablas.
+- El sitio público solo lee vistas (`public_*`) que excluyen borradores.
 
 ## Arquitectura
 
 ```text
-src/app                 Rutas, pantallas y endpoints de Next.js
-src/components          Componentes de presentación reutilizables
-src/lib                 Clientes de infraestructura y reglas de dominio
-supabase/migrations     Cambios versionados de esquema, RLS y funciones
+src/app/(site)          Sitio público: landing, /torneos, /torneo/[id], legales
+src/app/panel           Panel del organizador + server actions (actions.ts)
+src/app/api             Checkout y webhook de Mercado Pago
+src/components          UI compartida (ads, tabla, llave, compartir)
+src/lib/tournament      Dominio puro: fixture, posiciones, errores (con tests)
+src/lib/data            Acceso a datos: público cacheado y panel con sesión
+src/proxy.ts            Refresco de sesión y redirección optimista del panel
+supabase/migrations     Esquema, RLS y funciones versionadas
 ```
 
-La aplicación usa Next.js App Router, React, TypeScript, Tailwind CSS y
-Supabase (Auth, Postgres y Row Level Security). Las reglas que afectan la
-integridad de un torneo deben vivir en Supabase o en funciones de dominio
-deterministas, no solamente en la interfaz.
+Next.js 16 con Cache Components: los datos públicos usan `"use cache"` con el
+perfil `live` (`next.config.ts`) y tags por torneo. Cada acción del organizador
+invalida el tag (`updateTag`), así que miles de jugadores recargando la página
+cuestan una sola lectura a la base, pero ven el resultado al instante.
 
-## Configuración local
-
-Requisitos:
-
-- Node.js compatible con Next.js 16
-- Un proyecto Supabase
-- Credenciales de Mercado Pago solo si se quiere probar Premium
+## Puesta en marcha
 
 ```bash
 npm ci
-Copy-Item .env.example .env.local
+Copy-Item .env.example .env.local   # completar valores
+npm run dev
 ```
 
-Completar `.env.local` con las variables de `.env.example`. Nunca subir
-`.env.local`, claves de servicio ni secretos de webhooks.
+Aplicar las migraciones en orden (SQL Editor de Supabase o `supabase db push`):
 
-Aplicar las migraciones en orden desde el SQL Editor de Supabase:
+1. `20261027000000_base_schema.sql` — tablas base (idempotente)
+2. `20261028232000_add_tournament_ownership_rls.sql`
+3. `20261029000000_create_tournament_transaction.sql`
+4. `20261106000000_competition_engine.sql` — motor de competición, permisos,
+   vistas públicas, pagos
 
-1. `supabase/migrations/20261028232000_add_tournament_ownership_rls.sql`
-2. `supabase/migrations/20261029000000_create_tournament_transaction.sql`
+En Supabase Auth, agregar `<SITE_URL>/auth/callback` a las Redirect URLs.
 
-La primera migración presupone que las tablas base (`tournaments`,
-`competitors` y `matches`) ya existen en el proyecto Supabase.
+### AdSense
+
+1. Publicar el sitio en el dominio definitivo con `/privacidad` accesible.
+2. Solicitar la aprobación en AdSense y crear tres bloques de anuncios
+   (superior, en artículo, inferior).
+3. Definir `NEXT_PUBLIC_ADSENSE_CLIENT` y los tres `NEXT_PUBLIC_ADSENSE_SLOT_*`
+   y volver a desplegar (son variables de compilación). `/ads.txt` se genera solo.
+4. Para tráfico de la UE/Reino Unido, activar el mensaje de consentimiento (CMP)
+   de Google desde AdSense → Privacidad y mensajes.
+
+### Mercado Pago
+
+Configurar el webhook en `<SITE_URL>/api/webhooks/mercadopago` con el evento
+"Pagos", y copiar la clave secreta a `MP_WEBHOOK_SECRET`.
 
 ## Comandos
 
 ```bash
-npm run dev       # desarrollo
-npm run lint      # ESLint
-npm run build     # compilación de producción
-npm start         # servir la compilación
+npm run dev        # desarrollo
+npm test           # tests del dominio (node:test, sin dependencias)
+npm run typecheck  # TypeScript
+npm run lint       # ESLint
+npm run build      # build de producción
 ```
 
-El build puede compilar sin credenciales locales porque la inicialización del
-cliente de Supabase es diferida. Las rutas que requieren datos mostrarán un
-error explícito si faltan las variables de entorno.
+## Próximos pasos sugeridos
 
-## Decisiones para escalar
-
-1. **Dominio antes que pantallas:** cada formato debe tener reglas de fixture,
-   avance y clasificación verificables.
-2. **Operaciones atómicas:** una acción de negocio que crea un torneo no puede
-   dejar participantes o partidos huérfanos.
-3. **Autorización en profundidad:** la UI oculta acciones, pero RLS y funciones
-   de Postgres son la autoridad real.
-4. **Estados explícitos:** `borrador`, `activo` y `finalizado` deben gobernar
-   qué acciones están disponibles.
-5. **Evolución por verticales:** el siguiente bloque recomendado es completar
-   el motor de eliminatorias (avance automático, desempates y cierre), seguido
-   por invitaciones y métricas de operación.
+- Página por deporte/ciudad (`/torneos/padel/rosario`) para captar búsquedas locales.
+- Notificaciones push o por WhatsApp cuando se carga un resultado del equipo seguido.
+- Carga de resultados delegada a un co-organizador o árbitro por enlace.
+- Fase de grupos + eliminación (formato mundial) reutilizando ambos motores.
+- Métricas: eventos de vistas por torneo para mostrarle al organizador su alcance
+  (y venderle Premium a quien tiene sponsors).
